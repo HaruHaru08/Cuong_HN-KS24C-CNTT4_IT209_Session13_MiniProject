@@ -1,0 +1,86 @@
+services:
+  # ------------------------------------------
+  # Database: MySQL 8.0 with Persistent Volume
+  # ------------------------------------------
+  mysql:
+    image: mysql:8.0
+    container_name: campushub-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password_secret}
+      MYSQL_DATABASE: ${DB_NAME:-campus_hub}
+      MYSQL_USER: ${DB_USERNAME:-campushub}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-campushub_secret_pwd}
+    ports:
+      - "${DB_PORT:-3307}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - campushub-network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u $$MYSQL_USER -p$$MYSQL_PASSWORD || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  # ------------------------------------------
+  # Backend: Spring Boot 3 API Monolith
+  # ------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: campushub-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/${DB_NAME:-campus_hub}?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
+      DB_USERNAME: ${DB_USERNAME:-campushub}
+      DB_PASSWORD: ${DB_PASSWORD:-campushub_secret_pwd}
+      SERVER_PORT: 8080
+      CORS_ALLOWED_ORIGINS: http://localhost,http://localhost:80,http://localhost:5173,http://127.0.0.1
+    ports:
+      - "8080:8080"
+    networks:
+      - campushub-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ------------------------------------------
+  # Frontend: React Vite SPA + Nginx Reverse Proxy
+  # ------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: campushub-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    networks:
+      - campushub-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  mysql_data:
+    name: campushub_mysql_data
+
+networks:
+  campushub-network:
+    name: campushub_network
+    driver: bridge

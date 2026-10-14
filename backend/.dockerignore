@@ -1,0 +1,9 @@
+.gradle
+build
+!build/libs/*.jar
+.git
+.gitignore
+.idea
+*.iml
+.vscode
+*.log
